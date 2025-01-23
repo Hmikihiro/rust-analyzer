@@ -711,19 +711,19 @@ pub enum NameRefClass {
 }
 
 impl NameRefClass {
+    // Note: we don't have unit-tests for this rather important function.
+    // It is primarily exercised via goto definition tests in `ide`.
     pub fn classify(
         sema: &Semantics<'_, RootDatabase>,
         name_ref: &ast::NameRef,
     ) -> Option<NameRefClass> {
-        Self::classify_with_definition(sema, name_ref, &None)
+        Self::classify_with_definition(sema, name_ref, None)
     }
 
-    // Note: we don't have unit-tests for this rather important function.
-    // It is primarily exercised via goto definition tests in `ide`.
     pub fn classify_with_definition(
         sema: &Semantics<'_, RootDatabase>,
         name_ref: &ast::NameRef,
-        def: &Option<Definition>,
+        def: Option<&Definition>,
     ) -> Option<NameRefClass> {
         let _p = tracing::info_span!("NameRefClass::classify", ?name_ref).entered();
 
