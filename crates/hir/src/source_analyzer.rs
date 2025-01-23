@@ -10,7 +10,8 @@ use std::iter::{self, once};
 use crate::{
     db::HirDatabase, semantics::PathResolution, Adt, AssocItem, BindingMode, BuiltinAttr,
     BuiltinType, Callable, Const, DeriveHelper, Field, Function, GenericSubstitution, Local, Macro,
-    ModuleDef, Static, Struct, ToolModule, Trait, TraitAlias, TupleField, Type, TypeAlias, Variant,
+    Module, ModuleDef, Static, Struct, ToolModule, Trait, TraitAlias, TupleField, Type, TypeAlias,
+    Variant,
 };
 use either::Either;
 use hir_def::{
@@ -707,6 +708,7 @@ impl SourceAnalyzer {
         &self,
         db: &dyn HirDatabase,
         path: &ast::Path,
+        module: &Option<Module>,
     ) -> Option<(PathResolution, Option<GenericSubstitution>)> {
         let parent = path.syntax().parent();
         let parent = || parent.clone();
@@ -849,8 +851,14 @@ impl SourceAnalyzer {
         // trying to resolve foo::bar.
         if let Some(use_tree) = parent().and_then(ast::UseTree::cast) {
             if use_tree.coloncolon_token().is_some() {
-                return resolve_hir_path_qualifier(db, &self.resolver, &hir_path, &types_map)
-                    .map(|it| (it, None));
+                return resolve_hir_path_qualifier(
+                    db,
+                    &self.resolver,
+                    &hir_path,
+                    &types_map,
+                    module,
+                )
+                .map(|it| (it, None));
             }
         }
 
@@ -867,7 +875,13 @@ impl SourceAnalyzer {
         // Case where path is a qualifier of another path, e.g. foo::bar::Baz where we are
         // trying to resolve foo::bar.
         if path.parent_path().is_some() {
-            return match resolve_hir_path_qualifier(db, &self.resolver, &hir_path, &types_map) {
+            return match resolve_hir_path_qualifier(
+                db,
+                &self.resolver,
+                &hir_path,
+                &types_map,
+                module,
+            ) {
                 None if meta_path.is_some() => path
                     .first_segment()
                     .and_then(|it| it.name_ref())
@@ -951,7 +965,7 @@ impl SourceAnalyzer {
         }
         if parent().is_some_and(|it| ast::Visibility::can_cast(it.kind())) {
             // No substitution because only modules can be inside visibilities, and those have no generics.
-            resolve_hir_path_qualifier(db, &self.resolver, &hir_path, &types_map)
+            resolve_hir_path_qualifier(db, &self.resolver, &hir_path, &types_map, module)
                 .map(|it| (it, None))
         } else {
             // Probably a type, no need to show substitutions for those.
@@ -1501,8 +1515,9 @@ fn resolve_hir_path_qualifier(
     resolver: &Resolver,
     path: &Path,
     types_map: &TypesMap,
+    module: &Option<Module>,
 ) -> Option<PathResolution> {
-    (|| {
+    let f = || {
         let (ty, unresolved) = match path.type_anchor() {
             Some(type_ref) => {
                 let (_, res) = TyLoweringContext::new_maybe_unowned(
@@ -1568,13 +1583,29 @@ fn resolve_hir_path_qualifier(
                 .map(PathResolution::Def),
             None => Some(res),
         }
-    })()
-    .or_else(|| {
+    };
+
+    let Some(path) = path.mod_path() else {
+        return f();
+    };
+
+    let resolve_module = || {
         resolver
-            .resolve_module_path_in_items(db.upcast(), path.mod_path()?)
+            .resolve_module_path_in_items(db.upcast(), path)
             .take_types()
             .map(|it| PathResolution::Def(it.into()))
-    })
+    };
+
+    if let &Some(module) = module {
+        let resolved = resolve_module();
+        if resolved == Some(PathResolution::Def(ModuleDef::Module(module))) {
+            return resolved;
+        } else {
+            return f().or(resolved);
+        }
+    } else {
+        return f().or_else(|| resolve_module());
+    }
 }
 
 pub(crate) fn name_hygiene(db: &dyn HirDatabase, name: InFile<&SyntaxNode>) -> HygieneId {

@@ -1012,4 +1012,87 @@ fn test(_: Bar) {
 "#,
         );
     }
+
+    #[test]
+    fn duplicate_struct_module() {
+        check_assist(
+            remove_unused_imports,
+            r#"
+struct foo();
+
+mod X {
+    pub mod foo {
+        pub fn foo_func () {}
+    }
+    pub mod bar {
+        pub fn bar_func() {}
+    }
+    pub mod baz {
+        pub fn baz_func() {}
+    }
+}
+
+fn main() {
+    $0use {X::foo, X::bar X::baz};$0
+    foo::foo_func();
+    bar::bar_func();
+}
+"#,
+            r#"
+struct foo();
+
+mod X {
+    pub mod foo {
+        pub fn foo_func () {}
+    }
+    pub mod bar {
+        pub fn bar_func() {}
+    }
+    pub mod baz {
+        pub fn baz_func() {}
+    }
+}
+
+fn main() {
+    use {X::foo, X::bar};
+    foo::foo_func();
+    bar::bar_func();
+}
+"#,
+        );
+    }
+
+    #[test]
+    fn unduplicate_struct_module() {
+        check_assist(
+            remove_unused_imports,
+            r#"
+struct foo{};
+
+mod X {
+    pub mod foo {
+        pub fn foo_func () {}
+    }
+}
+
+fn main() {
+    $0use {X::foo};$0
+    let s = foo{};
+}
+"#,
+            r#"
+struct foo{};
+
+mod X {
+    pub mod foo {
+        pub fn foo_func () {}
+    }
+}
+
+fn main() {
+    let s = foo{};
+}
+"#,
+        );
+    }
 }

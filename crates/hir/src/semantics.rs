@@ -1560,14 +1560,15 @@ impl<'db> SemanticsImpl<'db> {
     }
 
     pub fn resolve_path(&self, path: &ast::Path) -> Option<PathResolution> {
-        self.resolve_path_with_subst(path).map(|(it, _)| it)
+        self.resolve_path_with_subst(path, &None).map(|(it, _)| it)
     }
 
     pub fn resolve_path_with_subst(
         &self,
         path: &ast::Path,
+        module: &Option<Module>,
     ) -> Option<(PathResolution, Option<GenericSubstitution>)> {
-        self.analyze(path.syntax())?.resolve_path(self.db, path)
+        self.analyze(path.syntax())?.resolve_path(self.db, path, module)
     }
 
     pub fn resolve_use_type_arg(&self, name: &ast::NameRef) -> Option<TypeParam> {
