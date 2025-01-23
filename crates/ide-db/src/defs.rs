@@ -715,15 +715,15 @@ impl NameRefClass {
         sema: &Semantics<'_, RootDatabase>,
         name_ref: &ast::NameRef,
     ) -> Option<NameRefClass> {
-        Self::classify_with_module(sema, name_ref, &None)
+        Self::classify_with_definition(sema, name_ref, &None)
     }
 
     // Note: we don't have unit-tests for this rather important function.
     // It is primarily exercised via goto definition tests in `ide`.
-    pub fn classify_with_module(
+    pub fn classify_with_definition(
         sema: &Semantics<'_, RootDatabase>,
         name_ref: &ast::NameRef,
-        module: &Option<Module>,
+        def: &Option<Definition>,
     ) -> Option<NameRefClass> {
         let _p = tracing::info_span!("NameRefClass::classify", ?name_ref).entered();
 
@@ -755,6 +755,10 @@ impl NameRefClass {
                     }
                 }
             }
+            let module = match def {
+                Some(Definition::Module(module)) => Some(module),
+                _ => None,
+            };
             return sema
                 .resolve_path_with_subst(&path, module)
                 .map(|(res, subst)| NameRefClass::Definition(res.into(), subst));

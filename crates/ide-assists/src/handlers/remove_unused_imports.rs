@@ -1018,7 +1018,8 @@ fn test(_: Bar) {
         check_assist(
             remove_unused_imports,
             r#"
-struct foo();
+struct foo;
+struct bar;
 
 mod X {
     pub mod foo {
@@ -1027,19 +1028,17 @@ mod X {
     pub mod bar {
         pub fn bar_func() {}
     }
-    pub mod baz {
-        pub fn baz_func() {}
-    }
 }
 
 fn main() {
-    $0use {X::foo, X::bar X::baz};$0
+    $0use {X::foo, X::bar};$0
     foo::foo_func();
-    bar::bar_func();
+    bar;
 }
 "#,
             r#"
-struct foo();
+struct foo;
+struct bar;
 
 mod X {
     pub mod foo {
@@ -1048,49 +1047,12 @@ mod X {
     pub mod bar {
         pub fn bar_func() {}
     }
-    pub mod baz {
-        pub fn baz_func() {}
-    }
 }
 
 fn main() {
-    use {X::foo, X::bar};
+    use X::foo;
     foo::foo_func();
-    bar::bar_func();
-}
-"#,
-        );
-    }
-
-    #[test]
-    fn unduplicate_struct_module() {
-        check_assist(
-            remove_unused_imports,
-            r#"
-struct foo{};
-
-mod X {
-    pub mod foo {
-        pub fn foo_func () {}
-    }
-}
-
-fn main() {
-    $0use {X::foo};$0
-    let s = foo{};
-}
-"#,
-            r#"
-struct foo{};
-
-mod X {
-    pub mod foo {
-        pub fn foo_func () {}
-    }
-}
-
-fn main() {
-    let s = foo{};
+    bar;
 }
 "#,
         );

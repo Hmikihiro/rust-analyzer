@@ -708,7 +708,7 @@ impl SourceAnalyzer {
         &self,
         db: &dyn HirDatabase,
         path: &ast::Path,
-        module: &Option<Module>,
+        module: Option<&Module>,
     ) -> Option<(PathResolution, Option<GenericSubstitution>)> {
         let parent = path.syntax().parent();
         let parent = || parent.clone();
@@ -1515,9 +1515,9 @@ fn resolve_hir_path_qualifier(
     resolver: &Resolver,
     path: &Path,
     types_map: &TypesMap,
-    module: &Option<Module>,
+    module: Option<&Module>,
 ) -> Option<PathResolution> {
-    let f = || {
+    let find_type_ns = || {
         let (ty, unresolved) = match path.type_anchor() {
             Some(type_ref) => {
                 let (_, res) = TyLoweringContext::new_maybe_unowned(
@@ -1585,26 +1585,22 @@ fn resolve_hir_path_qualifier(
         }
     };
 
-    let Some(path) = path.mod_path() else {
-        return f();
-    };
-
     let resolve_module = || {
         resolver
-            .resolve_module_path_in_items(db.upcast(), path)
+            .resolve_module_path_in_items(db.upcast(), path.mod_path()?)
             .take_types()
             .map(|it| PathResolution::Def(it.into()))
     };
 
-    if let &Some(module) = module {
+    if let Some(module) = module {
         let resolved = resolve_module();
-        if resolved == Some(PathResolution::Def(ModuleDef::Module(module))) {
-            return resolved;
+        if resolved == Some(PathResolution::Def(ModuleDef::Module(*module))) {
+            resolved
         } else {
-            return f().or(resolved);
+            find_type_ns().or(resolved)
         }
     } else {
-        return f().or_else(|| resolve_module());
+        find_type_ns().or(resolve_module())
     }
 }
 

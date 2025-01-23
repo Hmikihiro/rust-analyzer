@@ -1170,11 +1170,7 @@ impl<'a> FindUsages<'a> {
         name_ref: &ast::NameRef,
         sink: &mut dyn FnMut(EditionedFileId, FileReference) -> bool,
     ) -> bool {
-        let module = match self.def {
-            Definition::Module(module) => Some(module),
-            _ => None,
-        };
-        match NameRefClass::classify_with_module(self.sema, name_ref, &module) {
+        match NameRefClass::classify_with_definition(self.sema, name_ref, &Some(self.def)) {
             Some(NameRefClass::Definition(def, _))
                 if self.def == def
                     // is our def a trait assoc item? then we want to find all assoc items from trait impls of our trait
