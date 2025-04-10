@@ -34,7 +34,6 @@ jobs:
               - 'editors/code/**'
 
   proc-macro-srv:
-    if: github.repository == 'rust-lang/rust-analyzer'
     name: proc-macro-srv
     runs-on: ubuntu-latest
     env:
