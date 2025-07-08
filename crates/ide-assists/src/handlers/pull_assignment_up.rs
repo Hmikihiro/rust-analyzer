@@ -1,7 +1,7 @@
 use syntax::{
-    AstNode,
-    ast::{self, make},
-    ted,
+    AstNode, TextRange,
+    algo::find_node_at_range,
+    ast::{self, syntax_factory::SyntaxFactory},
 };
 
 use crate::{
@@ -66,33 +66,37 @@ pub(crate) fn pull_assignment_up(acc: &mut Assists, ctx: &AssistContext<'_>) -> 
             return None;
         }
     }
-
+    let target = tgt.syntax().text_range();
     acc.add(
         AssistId::refactor_extract("pull_assignment_up"),
         "Pull assignment up",
-        tgt.syntax().text_range(),
+        target,
         move |edit| {
-            let assignments: Vec<_> = collector
-                .assignments
-                .into_iter()
-                .map(|(stmt, rhs)| (edit.make_mut(stmt), rhs.clone_for_update()))
-                .collect();
-
-            let tgt = edit.make_mut(tgt);
-
-            for (stmt, rhs) in assignments {
+            let mut editor = edit.make_editor(tgt.syntax());
+            let mut new_target_end = target.end();
+            for (stmt, rhs) in collector.assignments {
                 let mut stmt = stmt.syntax().clone();
                 if let Some(parent) = stmt.parent() {
                     if ast::ExprStmt::cast(parent.clone()).is_some() {
                         stmt = parent.clone();
                     }
                 }
-                ted::replace(stmt, rhs.syntax());
+                let diff = stmt.text_range().len() - rhs.syntax().text_range().len();
+                new_target_end -= diff;
+                editor.replace(stmt, rhs.syntax());
             }
-            let assign_expr = make::expr_assignment(collector.common_lhs, tgt.clone());
-            let assign_stmt = make::expr_stmt(assign_expr);
+            let new_tgt_root = editor.finish().new_root().clone();
+            let new_target_range = TextRange::new(target.start(), new_target_end);
+            let new_tgt = find_node_at_range::<ast::Expr>(&new_tgt_root, new_target_range).unwrap();
 
-            ted::replace(tgt.syntax(), assign_stmt.syntax().clone_for_update());
+            let make = SyntaxFactory::with_mappings();
+            let mut editor = edit.make_editor(tgt.syntax());
+            let assign_expr = make.expr_assignment(collector.common_lhs, new_tgt.clone());
+            let assign_stmt = make.expr_stmt(assign_expr.into());
+
+            editor.replace(tgt.syntax(), assign_stmt.syntax());
+            editor.add_mappings(make.finish_with_mappings());
+            edit.add_file_edits(ctx.vfs_file_id(), editor);
         },
     )
 }
