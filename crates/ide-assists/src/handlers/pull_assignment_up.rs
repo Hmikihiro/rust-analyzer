@@ -1,6 +1,6 @@
 use syntax::{
     AstNode,
-    algo::find_node_at_range,
+    algo::{find_node_at_offset, find_node_at_range},
     ast::{self, syntax_factory::SyntaxFactory},
     syntax_editor::SyntaxEditor,
 };
@@ -69,27 +69,9 @@ pub(crate) fn pull_assignment_up(acc: &mut Assists, ctx: &AssistContext<'_>) -> 
     }
     let target = tgt.syntax().text_range();
 
-    let edit_tgt = tgt.syntax().clone_subtree();
-    let assignments: Vec<_> = collector
-        .assignments
-        .into_iter()
-        .filter_map(|(stmt, rhs)| {
-            Some((
-                find_node_at_range::<ast::BinExpr>(
-                    &edit_tgt,
-                    stmt.syntax().text_range() - target.start(),
-                )?,
-                find_node_at_range::<ast::Expr>(
-                    &edit_tgt,
-                    rhs.syntax().text_range() - target.start(),
-                )?,
-            ))
-        })
-        .collect();
+    let mut editor = SyntaxEditor::new(tgt.syntax().clone());
 
-    let mut editor = SyntaxEditor::new(edit_tgt);
-
-    for (stmt, rhs) in assignments {
+    for (stmt, rhs) in collector.assignments {
         let mut stmt = stmt.syntax().clone();
         if let Some(parent) = stmt.parent() {
             if ast::ExprStmt::cast(parent.clone()).is_some() {
@@ -99,7 +81,7 @@ pub(crate) fn pull_assignment_up(acc: &mut Assists, ctx: &AssistContext<'_>) -> 
         editor.replace(stmt, rhs.syntax());
     }
     let new_tgt_root = editor.finish().new_root().clone();
-    let new_tgt = ast::Expr::cast(new_tgt_root)?;
+    let new_tgt = find_node_at_offset::<ast::Expr>(&new_tgt_root, target.start())?;
     acc.add(
         AssistId::refactor_extract("pull_assignment_up"),
         "Pull assignment up",
