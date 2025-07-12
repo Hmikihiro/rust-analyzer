@@ -1,7 +1,7 @@
 use itertools::Itertools;
 use syntax::{
     Edition, NodeOrToken, SyntaxNode, SyntaxToken, T,
-    ast::{self, AstNode, make},
+    ast::{self, AstNode, syntax_factory::SyntaxFactory},
     match_ast,
     syntax_editor::{Position, SyntaxEditor},
 };
@@ -50,7 +50,7 @@ pub(crate) fn remove_dbg(acc: &mut Assists, ctx: &AssistContext<'_>) -> Option<(
         let mut editor = builder.make_editor(ctx.source_file().syntax());
         for (range, expr) in replacements {
             if let Some(expr) = expr {
-                editor.insert(Position::before(range[0].clone()), expr.syntax().clone_for_update());
+                editor.insert(Position::before(range[0].clone()), expr.syntax());
             }
             for node_or_token in range {
                 editor.delete(node_or_token);
@@ -87,6 +87,7 @@ fn compute_dbg_replacement(
         .collect::<Option<Vec<ast::Expr>>>()?;
 
     let parent = macro_expr.syntax().parent()?;
+    let make = SyntaxFactory::without_mappings();
     Some(match &*input_expressions {
         // dbg!()
         [] => {
@@ -108,7 +109,7 @@ fn compute_dbg_replacement(
                         }
                         (replace, None)
                     },
-                    _ => (vec![macro_call.syntax().clone().into()], Some(make::ext::expr_unit())),
+                    _ => (vec![macro_call.syntax().clone().into()], Some(make.expr_unit())),
                 }
             }
         }
@@ -151,13 +152,13 @@ fn compute_dbg_replacement(
                 None => false,
             };
             let expr = replace_nested_dbgs(expr.clone());
-            let expr = if wrap { make::expr_paren(expr).into() } else { expr.clone_subtree() };
+            let expr = if wrap { make.expr_paren(expr).into() } else { expr.clone() };
             (vec![macro_call.syntax().clone().into()], Some(expr))
         }
         // dbg!(expr0, expr1, ...)
         exprs => {
             let exprs = exprs.iter().cloned().map(replace_nested_dbgs);
-            let expr = make::expr_tuple(exprs);
+            let expr = make.expr_tuple(exprs);
             (vec![macro_call.syntax().clone().into()], Some(expr.into()))
         }
     })
@@ -196,7 +197,7 @@ fn replace_nested_dbgs(expanded: ast::Expr) -> ast::Expr {
         };
 
         if let Some(expr) = expr_opt {
-            editor.replace(mac.syntax(), expr.syntax().clone_for_update());
+            editor.replace(mac.syntax(), expr.syntax());
         } else {
             editor.delete(mac.syntax());
         }
