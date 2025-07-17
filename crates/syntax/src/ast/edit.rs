@@ -6,6 +6,7 @@ use std::{fmt, iter, ops};
 use crate::{
     AstToken, NodeOrToken, SyntaxElement, SyntaxNode, SyntaxToken,
     ast::{self, AstNode, make},
+    syntax_editor::SyntaxEditor,
     ted,
 };
 
@@ -95,6 +96,25 @@ impl IndentLevel {
         }
     }
 
+    pub(super) fn clone_subtree_increase_indent(self, node: &SyntaxNode) -> SyntaxNode {
+        let node = node.clone_subtree();
+        let tokens = node.preorder_with_tokens().filter_map(|event| match event {
+            rowan::WalkEvent::Leave(NodeOrToken::Token(it)) => Some(it),
+            _ => None,
+        });
+        let mut editor = SyntaxEditor::new(node);
+        for token in tokens {
+            if let Some(ws) = ast::Whitespace::cast(token) {
+                if ws.text().contains('\n') {
+                    let new_ws = make::tokens::whitespace(&format!("{}{self}", ws.syntax()));
+                    editor.replace(ws.syntax(), &new_ws);
+                }
+            }
+        }
+        let fin = editor.finish();
+        fin.new_root().clone()
+    }
+
     pub(super) fn decrease_indent(self, node: &SyntaxNode) {
         let tokens = node.preorder_with_tokens().filter_map(|event| match event {
             rowan::WalkEvent::Leave(NodeOrToken::Token(it)) => Some(it),
@@ -111,6 +131,27 @@ impl IndentLevel {
             }
         }
     }
+
+    pub(super) fn clone_subtree_decrease_indent(self, node: &SyntaxNode) -> SyntaxNode {
+        let node = node.clone_subtree();
+        let tokens = node.preorder_with_tokens().filter_map(|event| match event {
+            rowan::WalkEvent::Leave(NodeOrToken::Token(it)) => Some(it),
+            _ => None,
+        });
+        let mut editor = SyntaxEditor::new(node);
+        for token in tokens {
+            if let Some(ws) = ast::Whitespace::cast(token) {
+                if ws.text().contains('\n') {
+                    let new_ws = make::tokens::whitespace(
+                        &ws.syntax().text().replace(&format!("\n{self}"), "\n"),
+                    );
+                    editor.replace(ws.syntax(), &new_ws);
+                }
+            }
+        }
+        let fin = editor.finish();
+        fin.new_root().clone()
+    }
 }
 
 fn prev_tokens(token: SyntaxToken) -> impl Iterator<Item = SyntaxToken> {
@@ -124,23 +165,11 @@ pub trait AstNodeEdit: AstNode + Clone + Sized {
     }
     #[must_use]
     fn indent(&self, level: IndentLevel) -> Self {
-        fn indent_inner(node: &SyntaxNode, level: IndentLevel) -> SyntaxNode {
-            let res = node.clone_subtree().clone_for_update();
-            level.increase_indent(&res);
-            res.clone_subtree()
-        }
-
-        Self::cast(indent_inner(self.syntax(), level)).unwrap()
+        Self::cast(level.clone_subtree_increase_indent(self.syntax())).unwrap()
     }
     #[must_use]
     fn dedent(&self, level: IndentLevel) -> Self {
-        fn dedent_inner(node: &SyntaxNode, level: IndentLevel) -> SyntaxNode {
-            let res = node.clone_subtree().clone_for_update();
-            level.decrease_indent(&res);
-            res.clone_subtree()
-        }
-
-        Self::cast(dedent_inner(self.syntax(), level)).unwrap()
+        Self::cast(level.clone_subtree_decrease_indent(self.syntax())).unwrap()
     }
     #[must_use]
     fn reset_indent(&self) -> Self {
@@ -171,5 +200,14 @@ fn test_increase_indent() {
             _ => (),
             _ => (),
         }"
+    );
+
+    let reseted = arm_list.reset_indent();
+    assert_eq!(
+        reseted.syntax().to_string(),
+        "{
+    _ => (),
+    _ => (),
+}"
     );
 }
