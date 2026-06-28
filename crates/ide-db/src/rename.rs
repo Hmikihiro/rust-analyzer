@@ -23,12 +23,16 @@
 use std::fmt::{self, Display};
 
 use crate::{
+    search::ReferenceCategory,
     source_change::ChangeAnnotation,
     text_edit::{TextEdit, TextEditBuilder},
 };
 use base_db::AnchoredPathBuf;
 use either::Either;
-use hir::{FieldSource, FileRange, HasCrate, InFile, ModuleSource, Name, Semantics, sym};
+use hir::{
+    FieldSource, FileRange, HasCrate, InFile, ModuleSource, Name, PathResolutionPerNs, Semantics,
+    sym,
+};
 use itertools::Itertools;
 use rustc_hash::FxHashSet;
 use span::{Edition, FileId, SyntaxContext};
@@ -337,7 +341,7 @@ fn rename_mod(
         let edition = file_id.edition(sema.db);
         (
             file_id.file_id(sema.db),
-            source_edit_from_references(sema.db, references, def, &new_name, edition),
+            source_edit_from_references(sema, references, def, &new_name, edition),
         )
     });
     source_change.extend(ref_edits);
@@ -404,7 +408,7 @@ fn rename_reference(
         let edition = file_id.edition(sema.db);
         (
             file_id.file_id(sema.db),
-            source_edit_from_references(sema.db, references, def, &new_name, edition),
+            source_edit_from_references(sema, references, def, &new_name, edition),
         )
     }));
 
@@ -521,24 +525,24 @@ fn rename_field_constructors(
 }
 
 pub fn source_edit_from_references(
-    db: &RootDatabase,
+    sema: &Semantics<'_, RootDatabase>,
     references: &[FileReference],
     def: Definition,
     new_name: &Name,
     edition: Edition,
 ) -> TextEdit {
-    let name_display = new_name.display(db, edition);
+    let name_display = new_name.display(sema.db, edition);
     let mut edit = TextEdit::builder();
     // macros can cause multiple refs to occur for the same text range, so keep track of what we have edited so far
     let mut edited_ranges = Vec::new();
-    for &FileReference { range, ref name, .. } in references {
+    for &FileReference { range, ref name, category } in references {
         let name_range = name.text_range();
         let has_emitted_edit = match name {
             // if the ranges differ then the node is inside a macro call, we can't really attempt
             // to make special rewrites like shorthand syntax and such, so just rename the node in
             // the macro input
             FileReferenceNode::NameRef(name_ref) if name_range == range => {
-                source_edit_from_name_ref(&mut edit, name_ref, &name_display, def)
+                source_edit_from_name_ref(&mut edit, sema, name_ref, &name_display, def, category)
             }
             FileReferenceNode::Name(name) if name_range == range => {
                 source_edit_from_name(&mut edit, name, &name_display)
@@ -577,12 +581,50 @@ fn source_edit_from_name(
 
 fn source_edit_from_name_ref(
     edit: &mut TextEditBuilder,
+    sema: &hir::Semantics<'_, RootDatabase>,
     name_ref: &ast::NameRef,
     new_name: &dyn Display,
     def: Definition,
+    category: ReferenceCategory,
 ) -> bool {
     if name_ref.super_token().is_some() {
         return true;
+    }
+
+    if category == ReferenceCategory::IMPORT {
+        if let Some(path) =
+            name_ref.syntax().parent().and_then(ast::PathSegment::cast).map(|seg| seg.parent_path())
+            && let Some(use_tree) = path.syntax().parent().and_then(ast::UseTree::cast)
+            && let Some(PathResolutionPerNs { type_ns, value_ns, macro_ns }) =
+                sema.resolve_path_per_ns(&path)
+        {
+            let mut has_renamed = false;
+            let mut has_unrenamed = false;
+            for res in [type_ns, value_ns, macro_ns].into_iter().flatten() {
+                let ns_def = Definition::from(res);
+                if ns_def == def {
+                    has_renamed = true;
+                } else {
+                    has_unrenamed = true;
+                }
+            }
+
+            if has_renamed && has_unrenamed {
+                if use_tree.syntax().parent().and_then(ast::UseTreeList::cast).is_some() {
+                    edit.insert(use_tree.syntax().text_range().end(), format!(", {new_name}"));
+                } else {
+                    edit.replace(
+                        TextRange::new(
+                            name_ref.syntax().text_range().start(),
+                            name_ref.syntax().text_range().end(),
+                        ),
+                        format!("{{{}, {}}}", name_ref.text(), new_name),
+                    );
+                }
+
+                return true;
+            }
+        }
     }
 
     if let Some(record_field) = ast::RecordExprField::for_name_ref(name_ref) {

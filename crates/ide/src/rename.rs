@@ -180,7 +180,7 @@ pub(crate) fn rename(
                     source_change.extend(usages.references.get_mut(&file_id).iter().map(|refs| {
                         (
                             position.file_id,
-                            source_edit_from_references(db, refs, def, &new_name, edition),
+                            source_edit_from_references(&sema, refs, def, &new_name, edition),
                         )
                     }));
 
@@ -549,7 +549,7 @@ fn rename_to_self(
         (
             file_id.file_id(sema.db),
             source_edit_from_references(
-                sema.db,
+                sema,
                 references,
                 def,
                 &Name::new_symbol_root(sym::self_),
@@ -778,13 +778,7 @@ fn rename_self_to_param(
     source_change.extend(usages.iter().map(|(file_id, references)| {
         (
             file_id.file_id(sema.db),
-            source_edit_from_references(
-                sema.db,
-                references,
-                def,
-                new_name,
-                file_id.edition(sema.db),
-            ),
+            source_edit_from_references(sema, references, def, new_name, file_id.edition(sema.db)),
         )
     }));
     transform_method_call_into_assoc_fn(sema, &mut source_change, fn_def, find_path_config);
@@ -4161,5 +4155,61 @@ pub fn main() {
 }
 "#,
         );
+    }
+
+    #[test]
+    fn use_conflict_namespace() {
+        check(
+            "bar",
+            r#"
+fn foo() {}
+mod foo {}
+mod inner {
+    use super::foo;
+
+    pub fn test() {
+        $0foo();
+    }
+}
+            "#,
+            r#"
+fn bar() {}
+mod foo {}
+mod inner {
+    use super::{foo, bar};
+
+    pub fn test() {
+        bar();
+    }
+}
+            "#,
+        )
+    }
+
+    #[test]
+    fn use_multiple_namespace_struct() {
+        check(
+            "Bar",
+            r#"
+struct Foo;
+mod inner {
+    use super::Foo;
+
+    pub fn test() {
+        $0Foo;
+    }
+}
+            "#,
+            r#"
+struct Bar;
+mod inner {
+    use super::Bar;
+
+    pub fn test() {
+        Bar;
+    }
+}
+            "#,
+        )
     }
 }
